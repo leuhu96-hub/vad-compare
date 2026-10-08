@@ -1,0 +1,30 @@
+# Demo trên TEN VAD testset (xem README > Chạy thử nhanh). Không cần dữ liệu của bạn.
+data:
+  manifest: data/demo/manifest.csv
+  gt_bin: 0.5
+output_dir: out_demo
+num_threads: 1
+
+models:
+  - name: silero
+    type: silero
+    model_path: models/silero_vad.onnx
+  - name: webrtc_m1
+    type: webrtc
+    mode: 1
+  - name: webrtc_m3
+    type: webrtc
+    mode: 3
+  - name: ten
+    type: ten
+  - name: firered
+    type: firered
+    model_dir: models/firered
+  - name: firered_stream
+    type: firered
+    model_dir: models/firered
+    onnx: fireredvad_stream_vad.onnx
+  - name: yamnet
+    type: yamnet
+    model_path: models/yamnet_vad.tflite
+    enabled: false          # bật khi đã copy model của bạn vào models/

@@ -1,0 +1,75 @@
+# ---------------------------------------------------------------- data
+data:
+  manifest: data/manifest.csv     # tạo bằng: python -m vadcmp manifest --audio-root ... --gt-root ...
+  gt_bin: 0.5                     # độ dài 1 bin ground truth (giây)
+
+audio:
+  sample_rate: 16000              # mọi model đều chạy 16 kHz mono
+  decoder: librosa                # librosa | ffmpeg | pyav | auto   (mp3, mp4, m4a, wav, flac, ogg... sr/số kênh bất kỳ)
+  downmix: mean                   # mean (= librosa.to_mono) | left
+  res_type: soxr_hq               # librosa.resample: soxr_hq | soxr_vhq | kaiser_best | polyphase ...
+
+output_dir: out
+num_threads: 1                    # 1 thread/model -> so sánh công bằng, gần với điện thoại
+
+# ---------------------------------------------------------------- models
+# Mỗi model: name (duy nhất), type, threshold (bỏ trống = mặc định của model), enabled.
+# Tuỳ chọn chung: smooth_s (moving average trước khi threshold), postprocess (none | dict ghi đè).
+models:
+  - name: yamnet
+    type: yamnet
+    model_path: models/yamnet_vad.tflite   # hoặc .onnx - model YAMNet transfer learning của bạn
+    window_s: 0.96
+    hop_s: 0.08
+    speech_index: 1                        # vị trí class "speech" trong output 2 class
+    output: auto                           # auto | probs | logits
+    overlap: mean                          # rescore per hop: mean | max
+    threshold: 0.6026
+
+  - name: silero
+    type: silero
+    model_path: models/silero_vad.onnx
+
+  - name: webrtc
+    type: webrtc
+    mode: 2                                # 0..3, càng cao càng "khắt khe"
+    frame_ms: 30
+
+  - name: ten
+    type: ten
+    hop_size: 256
+
+  - name: firered
+    type: firered
+    model_dir: models/firered              # fireredvad_vad.onnx + cmvn.ark
+    onnx: fireredvad_vad.onnx              # fireredvad_stream_vad.onnx để thử bản streaming
+    threshold: 0.4
+
+  - name: pyannote
+    type: pyannote
+    checkpoint: pyannote/segmentation-3.0  # cần HF_TOKEN + chấp nhận điều khoản trên Hugging Face
+    enabled: false                         # bật khi đã cài pyannote.audio
+
+  # Kết quả có sẵn từ lib.so (chạy trên điện thoại), định dạng index,start,end,score
+  # - name: lib_so
+  #   type: precomputed
+  #   path_pattern: results/Model/{Category}_{index}.txt
+  #   threshold: 0.6026
+
+# ---------------------------------------------------------------- scoring
+# Post-processing chung áp lên quyết định nhị phân của MỌI model (giống lib on-device)
+postprocess:
+  pad_before: 0.10
+  pad_after: 0.12
+  merge_gap: 0.50
+  min_speech: 0.32
+  order: [pad, merge, drop]
+
+scoring:
+  bin_agg: mean             # score của model trong 1 bin GT: mean (theo overlap) | max
+  min_overlap: 0.5          # bin = speech nếu segment phủ >= 50% bin
+  boundary_tolerance: 1     # số bin mỗi phía điểm chuyển GT tính là "biên"
+
+report:
+  timelines: 12             # số file vẽ timeline (F1 thấp nhất)
+  timeline_sort: worst      # worst | manifest
