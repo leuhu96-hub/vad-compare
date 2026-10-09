@@ -115,8 +115,12 @@ def main():
     ap = argparse.ArgumentParser(description="FireRedVAD ONNX từng bước, input sr/kênh bất kỳ")
     ap.add_argument("inputs", nargs="+", help="file audio hoặc folder")
     ap.add_argument("-o", "--out", default=os.path.join(HERE, "out"))
-    ap.add_argument("--model-dir", default=os.path.join(HERE, "models"))
-    ap.add_argument("--mode", default="nonstream", choices=["nonstream", "stream", "stream_cached"])
+    ap.add_argument("--model-dir", default=os.path.join(HERE, "models"),
+                    help="thư mục chứa .onnx + cmvn.ark (tên chuẩn hoặc tên bất kỳ)")
+    ap.add_argument("--onnx", help="đường dẫn thẳng tới file .onnx có sẵn (tên tuỳ ý)")
+    ap.add_argument("--cmvn", help="đường dẫn cmvn.ark (mặc định: tìm cạnh file .onnx)")
+    ap.add_argument("--mode", default="auto", choices=["auto", "nonstream", "stream", "stream_cached"],
+                    help="auto = nhận dạng từ input/output của file ONNX")
     ap.add_argument("--chunk", type=int, default=10, help="stream_cached: số frame 10 ms mỗi lần gọi")
     ap.add_argument("--threads", type=int, default=1)
     ap.add_argument("--downmix", default="mean", help="mean | 0 | 1 ... (chọn kênh)")
@@ -137,9 +141,11 @@ def main():
 
     post = PostConfig(a.smooth, a.threshold, a.min_speech, a.max_speech, a.min_silence,
                       a.merge_silence, a.extend_speech)
-    vad = FireRedOnnx(a.model_dir, a.mode, a.threads, a.chunk, post, a.downmix, a.res_type, a.dither)
+    vad = FireRedOnnx(a.model_dir, a.mode, a.threads, a.chunk, post, a.downmix, a.res_type, a.dither,
+                      onnx_path=a.onnx, cmvn_path=a.cmvn)
+    print(f"Model: {vad.onnx_path} ({vad.mode}), CMVN: {vad.cmvn_path}")
     if a.show_model:
-        print(f"[{a.mode}] {describe_session(vad.sess)}")
+        print(describe_session(vad.sess))
     os.makedirs(a.out, exist_ok=True)
     files = list_inputs(a.inputs)
     rows = []

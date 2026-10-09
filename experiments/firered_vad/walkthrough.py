@@ -23,7 +23,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("audio")
     ap.add_argument("--model-dir", default=os.path.join(HERE, "models"))
-    ap.add_argument("--mode", default="nonstream", choices=list(fo.MODEL_FILES))
+    ap.add_argument("--onnx", help="file .onnx có sẵn (tên tuỳ ý)")
+    ap.add_argument("--cmvn", help="cmvn.ark (mặc định: cạnh file .onnx)")
+    ap.add_argument("--mode", default="auto", choices=["auto", *fo.MODEL_FILES])
     ap.add_argument("--chunk", type=int, default=10)
     a = ap.parse_args()
 
@@ -46,19 +48,20 @@ def main():
     show("5e", "|FFT 512|^2", st["5e_power"])
     show("5f", "mel 80", st["5f_mel"])
     show("5g", "log -> fbank", feat)
-    mean, istd = fo.load_cmvn(os.path.join(a.model_dir, "cmvn.ark"))
-    show("6", "cmvn mean / istd", np.stack([mean, istd]), "từ cmvn.ark")
+    vad = fo.FireRedOnnx(a.model_dir, a.mode, onnx_path=a.onnx, cmvn_path=a.cmvn)
+    mean, istd = vad.mean, vad.istd
+    show("6", "cmvn mean / istd", np.stack([mean, istd]), f"từ {vad.cmvn_path}")
     feat_n = fo.step6_cmvn(feat, mean, istd)
     show("6", "CMVN", feat_n, f"mean {feat_n.mean():.3f}, std {feat_n.std():.3f}")
-    sess = fo._session(os.path.join(a.model_dir, fo.MODEL_FILES[a.mode]))
-    print(f"\n      ONNX {fo.MODEL_FILES[a.mode]}\n{fo.describe_session(sess)}\n")
-    if a.mode == "nonstream":
+    sess = vad.sess
+    print(f"\n      ONNX {vad.onnx_path}  -> mode {vad.mode}\n{fo.describe_session(sess)}\n")
+    if vad.mode == "nonstream":
         probs = fo.step7_onnx_nonstream(sess, feat_n)
-    elif a.mode == "stream":
+    elif vad.mode == "stream":
         probs = fo.step7_onnx_stream_full(sess, feat_n)
     else:
         probs = fo.step7_onnx_stream_cached(sess, feat_n, a.chunk)
-    show("7", "probs", probs, f"1 giá trị / 10 ms ({a.mode})")
+    show("7", "probs", probs, f"1 giá trị / 10 ms ({vad.mode})")
     sm, binary, dec, segs = fo.step8_postprocess(probs, fo.PostConfig(), len(x16) / 16000)
     show("8", "smoothed", sm, "cửa sổ 5 frame")
     show("8", "decisions", dec, f"{dec.mean() * 100:.1f}% frame là speech")

@@ -14,6 +14,32 @@ python download_model.py            # 3 file .onnx + cmvn.ark -> ./models
 
 m4a/mp4/aac: librosa đọc qua audioread nên máy cần có `ffmpeg`.
 
+### Nếu đã có sẵn model
+
+Không cần chạy `download_model.py`. Có 3 cách chỉ tới model có sẵn:
+
+```bash
+# 1. Chỉ thẳng file .onnx (tên tuỳ ý). cmvn.ark được tìm cạnh file hoặc ở thư mục cha
+python run.py song.m4a --onnx /path/my_vad.onnx
+python run.py song.m4a --onnx /path/my_vad.onnx --cmvn /path/cmvn.ark
+
+# 2. Chỉ thư mục chứa .onnx + cmvn.ark (tên file tuỳ ý, tự chọn theo --mode)
+python run.py song.m4a --model-dir /path/onnx_models --mode stream_cached
+
+# 3. Copy / symlink vào ./models
+ln -s /path/onnx_models models
+```
+
+- **Không cần khai báo loại model.** Mặc định `--mode auto` đọc input/output của file ONNX:
+  có `caches_in` → `stream_cached`; có output `cache_out_*` → `stream`; còn lại → `nonstream`.
+- **Lỗi rõ ràng.** Nhầm file AED (output 3 lớp), hoặc `--mode` không khớp file, thì báo lỗi luôn.
+- **Thư mục chỉ có `model.pth.tar` + `cmvn.ark`** (bản tải từ Hugging Face) là checkpoint PyTorch,
+  chưa phải ONNX. Export 1 lần trên máy có torch, script in sẵn lệnh:
+  `python fireredvad/bin/export_onnx.py --task vad --model-dir <VAD> --output-dir <ra>`
+  (`--task stream_vad` cho Stream-VAD, ra 2 file stream và stream + cache).
+- **cmvn.ark phải đi cùng model.** Dùng cmvn của model khác thì feature lệch phân bố, kết quả sai mà
+  không báo lỗi.
+
 ## Chạy
 
 ```bash

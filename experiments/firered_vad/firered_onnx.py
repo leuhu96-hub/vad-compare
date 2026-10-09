@@ -424,6 +424,62 @@ MODEL_FILES = {
 }
 
 
+def detect_mode(sess) -> str:
+    """Nhận dạng loại model từ chữ ký ONNX (không phụ thuộc tên file):
+    có input caches_in -> stream_cached; có output cache_out_* -> stream; còn lại -> nonstream."""
+    ins = [i.name for i in sess.get_inputs()]
+    outs = [o.name for o in sess.get_outputs()]
+    if ins[0] != "feat" or sess.get_inputs()[0].shape[-1] != N_MELS:
+        raise ValueError(f"Không giống FireRedVAD: input {ins}, cần 'feat' [.., T, 80]")
+    if len(ins) > 1:
+        return "stream_cached"
+    if len(outs) > 1:
+        return "stream"
+    if sess.get_outputs()[0].shape[-1] not in (1, "1"):
+        raise ValueError(f"Output {sess.get_outputs()[0].shape} có >1 lớp - có thể là model AED, không phải VAD")
+    return "nonstream"
+
+
+def resolve_model(model_dir=None, mode="auto", onnx_path=None, cmvn_path=None):
+    """Tìm file ONNX + cmvn.ark. Thứ tự:
+    1. onnx_path / cmvn_path chỉ định rõ (tên file tuỳ ý).
+    2. model_dir chứa tên chuẩn (fireredvad_vad.onnx, ...).
+    3. model_dir chứa .onnx tên khác -> chọn theo chữ ký (detect_mode).
+    cmvn.ark: cạnh file ONNX, thư mục cha của nó, rồi mới tới model_dir."""
+    if onnx_path is None:
+        if not model_dir or not os.path.isdir(model_dir):
+            raise FileNotFoundError(f"Không thấy thư mục model: {model_dir}")
+        std = os.path.join(model_dir, MODEL_FILES.get(mode, MODEL_FILES["nonstream"]))
+        if os.path.exists(std):
+            onnx_path = std
+        else:
+            cands = sorted(f for f in os.listdir(model_dir) if f.endswith(".onnx"))
+            for f in cands:
+                try:
+                    m = detect_mode(_session(os.path.join(model_dir, f)))
+                except Exception:
+                    continue
+                if mode in ("auto", m):
+                    onnx_path = os.path.join(model_dir, f)
+                    break
+            if onnx_path is None:
+                if os.path.exists(os.path.join(model_dir, "model.pth.tar")):
+                    raise FileNotFoundError(
+                        f"{model_dir} chứa checkpoint PyTorch (model.pth.tar), chưa phải ONNX. Export 1 lần "
+                        "(cần torch): git clone https://github.com/FireRedTeam/FireRedVAD && cd FireRedVAD && "
+                        f"pip install -e . onnx && python fireredvad/bin/export_onnx.py --task vad "
+                        f"--model-dir {model_dir} --output-dir <thư mục ra>  (Stream-VAD: --task stream_vad)")
+                raise FileNotFoundError(f"Không có file .onnx FireRedVAD hợp lệ ({mode}) trong {model_dir}: {cands}")
+    if cmvn_path is None:
+        here = os.path.dirname(os.path.abspath(onnx_path))
+        dirs = [here, os.path.dirname(here)] + ([model_dir] if model_dir else [])
+        cmvn_path = next((os.path.join(d, "cmvn.ark") for d in dirs
+                          if os.path.exists(os.path.join(d, "cmvn.ark"))), None)
+        if cmvn_path is None:
+            raise FileNotFoundError(f"Không thấy cmvn.ark cạnh {onnx_path} - chỉ định bằng --cmvn")
+    return onnx_path, cmvn_path
+
+
 @dataclass
 class Result:
     path: str
@@ -443,18 +499,23 @@ class Result:
 
 
 class FireRedOnnx:
-    def __init__(self, model_dir: str, mode: str = "nonstream", threads: int = 1,
+    def __init__(self, model_dir: str | None = None, mode: str = "auto", threads: int = 1,
                  chunk_frames: int = 10, post: PostConfig = PostConfig(),
-                 downmix: str = "mean", res_type: str = "soxr_hq", dither="auto"):
-        if mode not in MODEL_FILES:
-            raise ValueError(f"mode phải là một trong {list(MODEL_FILES)}")
-        path = os.path.join(model_dir, MODEL_FILES[mode])
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"Thiếu {path} - chạy download_model.py")
-        self.mode, self.chunk_frames, self.post = mode, chunk_frames, post
+                 downmix: str = "mean", res_type: str = "soxr_hq", dither="auto",
+                 onnx_path: str | None = None, cmvn_path: str | None = None):
+        """model_dir: thư mục chứa .onnx + cmvn.ark, hoặc onnx_path/cmvn_path chỉ định thẳng file.
+        mode: auto (nhận từ chữ ký ONNX) | nonstream | stream | stream_cached."""
+        if mode not in ("auto", *MODEL_FILES):
+            raise ValueError(f"mode phải là auto hoặc một trong {list(MODEL_FILES)}")
+        self.onnx_path, self.cmvn_path = resolve_model(
+            model_dir, "nonstream" if (mode == "auto" and onnx_path is None) else mode, onnx_path, cmvn_path)
+        self.sess = _session(self.onnx_path, threads)
+        found = detect_mode(self.sess)
+        if mode not in ("auto", found):
+            raise ValueError(f"{self.onnx_path} là model '{found}', không phải '{mode}'")
+        self.mode, self.chunk_frames, self.post = found, chunk_frames, post
         self.downmix, self.res_type, self.dither = downmix, res_type, dither
-        self.sess = _session(path, threads)
-        self.mean, self.istd = load_cmvn(os.path.join(model_dir, "cmvn.ark"))
+        self.mean, self.istd = load_cmvn(self.cmvn_path)
 
     def run_array(self, x: np.ndarray, sr: int, keep_steps: bool = False, path: str = "") -> Result:
         """x: [C, N] hoặc [N], float32 [-1, 1], sr bất kỳ."""
