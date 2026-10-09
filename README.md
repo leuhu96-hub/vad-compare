@@ -174,7 +174,7 @@ rồi thêm `"my_vad": ("vadcmp.models.my_vad", "MyVAD")` vào `REGISTRY` trong 
 
 ## Experiments
 
-- [`experiments/firered_vad/`](experiments/firered_vad/): FireRedVAD chạy trực tiếp bằng ONNX từng bước (đọc audio sr/kênh bất kỳ → fbank → CMVN → ONNX non-stream/stream/stream+cache → post-processing), không dùng package `fireredvad`, kèm script kiểm chứng từng bước.
+- [`experiments/firered_vad/`](experiments/firered_vad/): FireRedVAD chạy trực tiếp bằng ONNX (không dùng package `fireredvad`) cho cả folder dataset `phase_1/<quality>/` + `Groundtruth/<category>/ground_truth/`, xuất segment và metric. `dataset_reader.py` đọc/ghép dataset, dùng lại được cho project khác.
 
 ## Test
 

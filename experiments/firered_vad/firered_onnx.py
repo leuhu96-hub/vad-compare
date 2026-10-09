@@ -19,7 +19,7 @@ Mỗi bước là một hàm riêng, có thể gọi lẻ để xem input/output
     step7_onnx_*          feat [1, T, 80] -> probs [T] (xác suất speech, mỗi frame 10 ms)
     step8_postprocess     probs -> decisions [T] (0/1) -> segments [(start_s, end_s)]
 
-Chỉ cần: numpy, onnxruntime, librosa (bước 1 + 3). Không cần torch / kaldi-native-fbank.
+Chỉ cần: numpy, onnxruntime, librosa (bước 1 + 3). Không cần torch / kaldi-native-fbank / fireredvad.
 """
 from __future__ import annotations
 
@@ -174,23 +174,6 @@ def step5_fbank(x_int16_scale: np.ndarray, return_steps: bool = False):
     s["5f_mel"] = m = step5f_mel(p)
     s["5g_logmel"] = feat = step5g_log(m)
     return (feat, s) if return_steps else feat
-
-
-def step5_fbank_knf(x_int16_scale: np.ndarray) -> np.ndarray:
-    """Bản tham chiếu dùng kaldi-native-fbank (chỉ để so sánh, không bắt buộc)."""
-    import kaldi_native_fbank as knf
-
-    o = knf.FbankOptions()
-    o.frame_opts.samp_freq = SAMPLE_RATE
-    o.frame_opts.frame_length_ms = 25
-    o.frame_opts.frame_shift_ms = 10
-    o.frame_opts.dither = 0
-    o.frame_opts.snip_edges = True
-    o.mel_opts.num_bins = N_MELS
-    fb = knf.OnlineFbank(o)
-    fb.accept_waveform(SAMPLE_RATE, x_int16_scale.astype(np.float32).tolist())
-    n = fb.num_frames_ready
-    return np.vstack([fb.get_frame(i) for i in range(n)]).astype(np.float32) if n else np.zeros((0, N_MELS), np.float32)
 
 
 # ============================================================================ step 6: CMVN
