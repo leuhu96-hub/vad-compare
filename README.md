@@ -172,6 +172,10 @@ class MyVAD(VADModel):
 
 rồi thêm `"my_vad": ("vadcmp.models.my_vad", "MyVAD")` vào `REGISTRY` trong `vadcmp/models/__init__.py`.
 
+## Experiments
+
+- [`experiments/firered_vad/`](experiments/firered_vad/): FireRedVAD chạy trực tiếp bằng ONNX từng bước (đọc audio sr/kênh bất kỳ → fbank → CMVN → ONNX non-stream/stream/stream+cache → post-processing), không dùng package `fireredvad`, kèm script kiểm chứng từng bước.
+
 ## Test
 
 ```bash

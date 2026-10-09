@@ -5,3 +5,5 @@ __pycache__/
 /data/
 /out/
 /out_*/
+/experiments/*/models
+/experiments/*/out*/
