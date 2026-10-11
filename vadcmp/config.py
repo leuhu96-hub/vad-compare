@@ -11,8 +11,10 @@ DEFAULTS = {
     "output_dir": "out",
     "num_threads": 1,
     "models": [],
-    # Applied to every model's binary decisions (same rules as the on-device lib)
+    # Applied to every model's binary decisions (same rules as the on-device lib).
+    # method: rules (pad/merge/drop) | fsm (máy trạng thái kiểu FireRed, xem vadcmp/decide.py)
     "postprocess": {
+        "method": "rules",
         "pad_before": 0.10, "pad_after": 0.12, "merge_gap": 0.50, "min_speech": 0.32,
         "order": ["pad", "merge", "drop"],
     },
@@ -74,4 +76,7 @@ def model_postprocess(cfg: dict, mcfg: dict) -> dict | None:
         return None
     if pp == "global":
         return cfg["postprocess"]
-    return _merge(cfg["postprocess"], pp)
+    g = cfg["postprocess"]
+    if pp.get("method", g.get("method", "rules")) != g.get("method", "rules"):
+        return dict(pp)          # đổi phương pháp (vd. fsm) -> không kế thừa pad/merge của rules
+    return _merge(g, pp)

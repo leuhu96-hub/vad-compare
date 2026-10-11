@@ -12,7 +12,8 @@ from vadcmp.config import model_postprocess, resolve
 from vadcmp.dataset import read_manifest
 from vadcmp.groundtruth import boundary_mask, gt_grid, parse_groundtruth
 from vadcmp.runner import load_cached, selected_models
-from vadcmp.timeline import bin_scores, binarize, postprocess, segments_to_bins
+from vadcmp.decide import decide
+from vadcmp.timeline import bin_scores, segments_to_bins
 
 
 def _safe_div(a, b):
@@ -109,11 +110,7 @@ def collect_bins(cfg: dict, only=None, log=print):
             fs_s = fs.smoothed(float(mc.get("smooth_s", 0.0)))
             thr = float(mc["threshold"])
             scores = bin_scores(fs_s, edges, sc["bin_agg"])
-            seg = binarize(fs_s, thr)
-            pp = model_postprocess(cfg, mc)
-            if pp:
-                seg = postprocess(seg, dur, pp["pad_before"], pp["pad_after"], pp["merge_gap"],
-                                  pp["min_speech"], pp.get("order", ("pad", "merge", "drop")))
+            seg = decide(fs_s, dur, thr, model_postprocess(cfg, mc))
             dec_pp = segments_to_bins(seg, edges, float(sc["min_overlap"]))
             keep = labels >= 0
             n = int(keep.sum())

@@ -17,7 +17,7 @@ from vadcmp.config import model_postprocess, resolve  # noqa: E402
 from vadcmp.groundtruth import gt_grid, parse_groundtruth  # noqa: E402
 from vadcmp.metrics import roc_points  # noqa: E402
 from vadcmp.runner import load_cached  # noqa: E402
-from vadcmp.timeline import binarize, postprocess  # noqa: E402
+from vadcmp.decide import decide, describe  # noqa: E402
 
 # Categorical slots in fixed order (validated palette); colour follows the model, by config order.
 SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
@@ -216,11 +216,7 @@ def chart_timeline(cfg, item, order, mcfgs, col, out_dir, title_extra=""):
         ax.step(np.r_[fs_s.start, fs_s.end[-1:]], np.r_[fs_s.prob, fs_s.prob[-1:]], where="post",
                 color=col[m], lw=1.3)
         ax.axhline(thr, color=MUTED, lw=0.8, ls="--")
-        seg = binarize(fs_s, thr)
-        pp = model_postprocess(cfg, mc)
-        if pp:
-            seg = postprocess(seg, dur, pp["pad_before"], pp["pad_after"], pp["merge_gap"],
-                              pp["min_speech"], pp.get("order", ("pad", "merge", "drop")))
+        seg = decide(fs_s, dur, thr, model_postprocess(cfg, mc))
         for s, e in seg:
             ax.plot([s, e], [-0.12, -0.12], color=INK, lw=3, solid_capstyle="butt")
         ax.set_ylim(-0.22, 1.05)
@@ -412,13 +408,11 @@ def write_report(cfg, bins, overall, bycat, perfile, speed_sum, order, items, lo
     cfg_rows = "".join(
         f"<div>{html.escape(m['name'])}</div><div><code>{html.escape(m['type'])}</code> "
         f"threshold={_fmt(float(m['threshold']), 4)}"
-        f"{' · post-processing: ' + html.escape(str(m['postprocess'])) if 'postprocess' in m else ''}</div>"
+        f"{' · post-processing: ' + html.escape(describe(m['postprocess'])) if 'postprocess' in m else ''}</div>"
         for m in cfg["models"] if m["name"] in order)
     head = (f"<h1>So sánh VAD</h1><p class='sub'>{len(items)} file · {bins.groupby('model').size().iloc[0]} bin "
             f"{cfg['data']['gt_bin']} s · {len(order)} model</p>"
-            f"<div class='kv'><div>Post-processing chung</div><div>pad trước {pp['pad_before']} s, pad sau "
-            f"{pp['pad_after']} s, merge gap &lt; {pp['merge_gap']} s, bỏ segment &lt; {pp['min_speech']} s "
-            f"(thứ tự: {' → '.join(pp.get('order', []))})</div>"
+            f"<div class='kv'><div>Post-processing chung</div><div>{html.escape(describe(pp))}</div>"
             f"<div>Boundary tolerance</div><div>{cfg['scoring']['boundary_tolerance']} bin mỗi phía</div>{cfg_rows}</div>")
     page = (f"<!doctype html><html lang='vi'><head><meta charset='utf-8'><meta name='viewport' "
             f"content='width=device-width,initial-scale=1'><title>VAD Comparison</title><style>{CSS}</style>"

@@ -4,6 +4,7 @@
     python -m vadcmp infer    -c config.yaml [--models silero,ten] [--force] [--limit 20]
     python -m vadcmp evaluate -c config.yaml [--models ...]      # metrics + report from cache
     python -m vadcmp run      -c config.yaml                     # infer + evaluate
+    python -m vadcmp tune     -c config.yaml --model yamnet      # dò post-processing (fsm) để giảm FAR
 """
 from __future__ import annotations
 
@@ -63,6 +64,15 @@ def cmd_evaluate(a):
     print(f"\nReport: {path}")
 
 
+def cmd_tune(a):
+    from vadcmp.tune import tune
+
+    cfg = load_config(a.config)
+    grid = {k: getattr(a, k) for k in ("thr", "thr_off", "min_speech", "min_silence", "hangover",
+                                       "pad_before", "pad_after", "smooth_s")}
+    tune(cfg, a.model, grid, a.objective, a.holdout, a.max_miss_increase, a.gt_bin, a.top)
+
+
 def cmd_run(a):
     cmd_infer(a)
     cmd_evaluate(a)
@@ -90,6 +100,23 @@ def main(argv=None):
             s.add_argument("--force", action="store_true", help="bỏ qua cache, chạy lại")
             s.add_argument("--limit", type=int, help="chỉ chạy N file đầu (thử nhanh)")
         s.set_defaults(func=fn)
+
+    t = sub.add_parser("tune", help="dò tham số post-processing kiểu FireRed (fsm) trên cache")
+    t.add_argument("-c", "--config", default="config.yaml")
+    t.add_argument("--model", required=True, help="tên model trong config")
+    t.add_argument("--objective", choices=["far", "f1"], default="far",
+                   help="far: FAR nhỏ nhất mà miss không tăng so với baseline; f1: F1 lớn nhất")
+    t.add_argument("--max-miss-increase", type=float, default=0.0,
+                   help="cho miss tăng tối đa bao nhiêu so với baseline (vd. 0.01 = 1 điểm %%)")
+    t.add_argument("--holdout", type=float, default=0.0, help="tỉ lệ file để kiểm tra lại (vd. 0.3)")
+    t.add_argument("--gt-bin", type=float, help="ghi đè data.gt_bin khi chấm")
+    t.add_argument("--top", type=int, default=8)
+    for k in ("thr", "thr_off", "min_speech", "min_silence", "hangover", "pad_before", "pad_after", "smooth_s"):
+        t.add_argument("--" + k.replace("_", "-"), dest=k,
+                       help="danh sách giá trị cách nhau dấu phẩy (thr = độ lệch so với threshold hiện tại; "
+                            "thr-off = khoảng hạ ngưỡng, 'none' = tắt)" if k in ("thr", "thr_off") else
+                       "danh sách giá trị cách nhau dấu phẩy")
+    t.set_defaults(func=cmd_tune)
 
     a = p.parse_args(argv)
     a.func(a)

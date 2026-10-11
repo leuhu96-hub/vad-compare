@@ -28,3 +28,10 @@ models:
     type: yamnet
     model_path: models/yamnet_vad.tflite
     enabled: false          # bật khi đã copy model của bạn vào models/
+
+  # MÔ PHỎNG YAMNet (0.96 s / 0.08 s) từ prob FireRed - xem scripts/simulate_yamnet.py.
+  # Dùng để thử `python -m vadcmp tune --model yamnet_sim`, KHÔNG phải kết quả YAMNet thật.
+  - name: yamnet_sim
+    type: precomputed
+    path_pattern: data/demo/yamnet_sim/{stem}.txt
+    threshold: 0.6026          # post-processing = mặc định (rules: pad 0.10/0.12 -> merge 0.5 -> drop 0.32)
