@@ -112,6 +112,7 @@ python -m vadcmp infer    -c config.yaml               # chạy model, cache và
 python -m vadcmp evaluate -c config.yaml               # metric + report từ cache (chạy lại rất nhanh)
 python -m vadcmp run      -c config.yaml               # cả hai
 python -m vadcmp infer    -c config.yaml --models silero,ten --limit 20 --force
+python -m vadcmp tune     -c config.yaml --model yamnet    # dò post-processing kiểu FireRed, xem bên dưới
 ```
 
 Đổi `threshold`, `postprocess`, `scoring` thì chỉ cần `evaluate` lại; đổi tham số model (`mode`,
@@ -142,6 +143,54 @@ audio ──decode/downmix/resample──► model ──► FrameScores (prob t
 
 `post-processing` mặc định áp cho mọi model để công bằng; ghi đè từng model bằng
 `postprocess: none` hoặc `postprocess: {merge_gap: 0.3}`; `smooth_s: 0.1` làm mượt prob trước khi threshold.
+
+### Post-processing kiểu FireRed (`method: fsm`) và `tune` để giảm FAR
+
+`postprocess.method` chọn cách biến score thành segment (`vadcmp/decide.py`):
+
+* `rules` (mặc định, giống lib.so): threshold → pad → merge → drop theo `order`. Với order mặc định
+  pad làm trước nên `min_speech` thực tế = 0.32 − 0.22 = **0.10 s**, `merge_gap` thực tế = 0.5 + 0.22 = **0.72 s**.
+* `fsm`: máy trạng thái của FireRedVAD, tính theo giây nên dùng được với mọi hop (YAMNet 0.08 s):
+  bỏ đoạn ngắn / lấp khoảng lặng ngắn **trên chuỗi thô**, rồi mới pad.
+
+```yaml
+  - name: yamnet
+    ...
+    threshold: 0.6526            # ngưỡng vào
+    postprocess:
+      method: fsm
+      thr_off: 0.5526            # ngưỡng ra (hysteresis); null = một ngưỡng
+      smooth_s: 0                # trung bình trượt nhìn về trước (FireRed: 0.05)
+      min_speech: 0.1            # đoạn thô phải DÀI HƠN (FireRed: 0.2)
+      min_silence: 0.16          # khoảng lặng thô phải dài hơn mới cắt đoạn (FireRed: 0.2)
+      hangover: true             # giữ thêm min_silence sau khi tiếng dừng (FireRed: có)
+      pad_before: 0              # làm sau cùng, cho phép âm (co đoạn)
+      pad_after: -0.08
+      max_speech: 0              # > 0: cắt đoạn dài tại điểm score thấp nhất
+```
+
+Model đổi `method` sẽ không kế thừa pad/merge của `postprocess` chung.
+Với `firered` ở hop 10 ms, `fsm` (smooth 0.05, 0.2/0.2, hangover) cho kết quả trùng `VadPostprocessor` gốc
+(chỉ khác ≤ 20 ms ở cuối file).
+
+Dò tham số trên cache, không chạy lại model:
+
+```bash
+python -m vadcmp tune -c config.yaml --model yamnet --holdout 0.3 \
+    --pad-before=-0.08,0,0.08 --pad-after=-0.16,-0.08,0,0.08
+```
+
+* `--objective far` (mặc định): FAR nhỏ nhất mà miss ≤ miss của cấu hình hiện tại (+ `--max-miss-increase`);
+  `--objective f1`: F1 lớn nhất.
+* Lưới mặc định: `--thr` (độ lệch so với threshold hiện tại) `-0.1..0.1`, `--thr-off none,0.1,0.2`,
+  `--min-speech`, `--min-silence`, `--hangover 1,0`, `--pad-before`, `--pad-after`, `--smooth-s`.
+* `--holdout 0.3`: chọn trên 70 % file, báo lại trên 30 % còn lại (`test_*`).
+* Kết quả: `out/tune_<model>.csv` (mỗi cấu hình: f1, miss, far, `far_core` = FAR xa biên GT,
+  `fp_boundary_share`), in top cấu hình và đoạn YAML để dán. Có thêm dòng `baseline_reordered`
+  (rules cùng tham số nhưng drop → merge → pad) để thấy riêng tác dụng của thứ tự.
+
+Chưa có YAMNet thật trong demo: `python scripts/simulate_yamnet.py -c config.demo.yaml` tạo score **mô phỏng**
+(0.96 s / 0.08 s) từ prob FireRed cho model `yamnet_sim` trong `config.demo.yaml`, để thử `tune`.
 
 ## Kết quả (`out/`)
 
