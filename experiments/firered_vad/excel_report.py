@@ -1,12 +1,15 @@
 """Báo cáo Excel cho FireRedVAD theo đúng bố cục sheet "KQ du lieu that" (mục A, B, C) của file
 Tong_hop_danh_gia_VAD_test.xlsx, để so trực tiếp với YAMNet.
 
-    python excel_report.py --xlsx Tong_hop_danh_gia_VAD_test.xlsx \
-        --audio-root "D:/data/phase_1" --gt-root "D:/data/AAA/Ground_truth" \
-        --onnx models/fireredvad_vad.onnx -o firered_report.xlsx
+    # chỉ có audio + GT + model: tự chia dev/test (30 % dev, theo file, phân tầng category, seed 3)
+    python excel_report.py --audio-root "D:/data/phase_1" --gt-root "D:/data/Groundtruth" \
+        --model-dir models -o firered_report.xlsx
+
+    # dùng đúng chia dev/test của file YAMNet và thêm mục so sánh D
+    python excel_report.py --xlsx Tong_hop_danh_gia_VAD_test.xlsx --audio-root ... --gt-root ... --model-dir models
 
 Giữ nguyên quy trình của file YAMNet:
-  * cùng danh sách file và cùng chia dev / test (đọc sheet "DL theo file" của --xlsx, hoặc --split-csv)
+  * chia dev / test: đọc sheet "DL theo file" của --xlsx, hoặc --split-csv, hoặc tự chia (--dev-ratio)
   * GT bin 0.5 s (đa số thời lượng), cờ biên ±1 bin quanh điểm chuyển GT
   * quét ngưỡng 0.01 … 0.95 (bước 0.01), chọn ngưỡng trên dev theo DCF-min hoặc F1-max
   * DCF = w·MR + (1−w)·FAR (w = 0.75), CI 95% bootstrap theo file (1000 lần, seed 0)
@@ -116,6 +119,44 @@ def match(split, audio_root, gt_root, quality=None, log=print):
             log(f"[!] {s['file']}: {len(a)} file audio trùng tên, dùng {a[0]} (chọn bản khác bằng --quality)")
         items.append({**s, "audio": a[0], "gt": g[0]})
     return items, problems
+
+
+def gt_category(gt_path, gt_root):
+    """category = thư mục đầu tiên dưới gt_root (Groundtruth/<category>/ground_truth/x.txt);
+    GT để phẳng thì lấy tiền tố tên file trước dấu '_' (Asm_xxx -> Asm)."""
+    rel = os.path.relpath(gt_path, gt_root).split(os.sep)
+    if len(rel) > 1 and rel[0].lower() != "ground_truth":
+        return rel[0]
+    stem = os.path.splitext(os.path.basename(gt_path))[0]
+    return stem.split("_", 1)[0] if "_" in stem else "Tất cả"
+
+
+def auto_split(audio_root, gt_root, dev_ratio, seed):
+    """Không có file chia sẵn: mọi file có cả audio và GT; chia dev/test theo file, phân tầng theo category."""
+    audio = {file_key(p) for p, _ in find_audio(audio_root, AUDIO_EXTS)}
+    by_cat = defaultdict(list)
+    for k, paths in sorted(index_gt(gt_root).items()):
+        if k in audio:
+            name = os.path.splitext(os.path.basename(paths[0]))[0]
+            by_cat[gt_category(paths[0], gt_root)].append(name)
+    rng = np.random.default_rng(seed)
+    out = []
+    for cat in sorted(by_cat):
+        names = sorted(by_cat[cat])
+        n_dev = int(round(dev_ratio * len(names)))
+        if dev_ratio > 0 and len(names) >= 2:
+            n_dev = min(max(n_dev, 1), len(names) - 1)
+        dev = set(rng.permutation(len(names))[:n_dev].tolist())
+        out += [{"file": n, "category": cat, "split": "dev" if i in dev else "test"} for i, n in enumerate(names)]
+    return out
+
+
+def write_split(path, split):
+    with open(path, "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f)
+        w.writerow(["File", "Category", "Tập"])
+        for s in split:
+            w.writerow([s["file"], s["category"], s["split"]])
 
 
 # =========================================================================== FireRed prob (cache)
@@ -576,7 +617,7 @@ def write_xlsx(path, items, problems, args, sel, ci, ci_cat, yam):
     dv1.add("B7")
     dv2.add("B8")
     put(ws, "A11", "Ngưỡng dùng (tự chọn trên dev theo B7, B8)", wrap=True)
-    put(ws, "B11", "=INDEX($G$17:$G$19,MATCH($B$7,$A$17:$A$19,0))", F(bold=True), R2)
+    put(ws, "B11", "=INDEX($G$17:$G$19,MATCH($B$7,$A$17:$A$19,0))" if dev else "=B10", F(bold=True), R2)
     put(ws, "A12", "Ngưỡng Python đã dùng cho CI và sheet DL theo file", wrap=True)
     put(ws, "B12", sel["thr"], blue, R2)
     put(ws, "A13", "Kiểm tra")
@@ -598,13 +639,17 @@ def write_xlsx(path, items, problems, args, sel, ci, ci_cat, yam):
         E, Rr, Qq = f"{Q}!$E${a}:$E${b}", f"{Q}!$R${a}:$R${b}", f"{Q}!$Q${a}:$Q${b}"
         put(ws, f"A{r}", cfg)
         put(ws, f"B{r}", desc[cfg], wrap=True)
+        if not dev:
+            for col in "CDEFG":
+                put(ws, f"{col}{r}", "–")
+            continue
         put(ws, f"C{r}", f"=INDEX({E},MATCH(MIN({Rr}),{Rr},0))", fmt=R2)
         put(ws, f"D{r}", f"=MIN({Rr})", fmt=R3)
         put(ws, f"E{r}", f"=INDEX({E},MATCH(MAX({Qq}),{Qq},0))", fmt=R2)
         put(ws, f"F{r}", f"=MAX({Qq})", fmt=R3)
         put(ws, f"G{r}", f'=IF($B$8="F1-max",E{r},C{r})', fmt=R2)
     if not dev:
-        put(ws, "A20", "Không có file dev: mục A trống, hãy kiểm tra cột Tập.", F(color="C00000"))
+        put(ws, "A20", "Không có file dev: không chọn được ngưỡng, B11 dùng ngưỡng tham khảo B10.", F(color="C00000"))
 
     # B
     put(ws, "A22", "B. Tầng B trên test (cấu hình B7, ngưỡng B11)", sect)
@@ -749,6 +794,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--xlsx", help="file tổng hợp YAMNet (lấy chia dev/test ở sheet 'DL theo file' + số YAMNet để so)")
     ap.add_argument("--split-csv", help="thay cho --xlsx: CSV có cột File, Category, Tập (dev/test)")
+    ap.add_argument("--dev-ratio", type=float, default=0.3,
+                    help="không có --xlsx / --split-csv: tỉ lệ file mỗi category đưa vào dev (0 = tất cả là test)")
+    ap.add_argument("--split-seed", type=int, default=3)
     ap.add_argument("--audio-root", required=True)
     ap.add_argument("--gt-root", required=True, help="thư mục GT; ghép theo tên file, ưu tiên file trong ground_truth/")
     ap.add_argument("--quality", help="nếu một tên file có nhiều bản audio: chọn bản có chuỗi này trong đường dẫn")
@@ -788,7 +836,13 @@ def main():
     elif args.xlsx:
         split, args.split_source = read_split_xlsx(args.xlsx), f"{os.path.basename(args.xlsx)} (sheet DL theo file)"
     else:
-        raise SystemExit("Cần --xlsx hoặc --split-csv để biết file nào là dev / test")
+        split = auto_split(args.audio_root, args.gt_root, args.dev_ratio, args.split_seed)
+        sp = os.path.splitext(os.path.abspath(args.out))[0] + "_split.csv"
+        os.makedirs(os.path.dirname(sp), exist_ok=True)
+        write_split(sp, split)
+        args.split_source = (f"tự chia: {args.dev_ratio:.0%} dev theo file, phân tầng category, seed "
+                             f"{args.split_seed} (lưu ở {os.path.basename(sp)})")
+        print(f"Tự chia dev/test -> {sp} (dùng lại bằng --split-csv)")
     split = [s for s in split if s["split"] in ("dev", "test")]
     if args.limit:
         split = split[:args.limit]
@@ -804,14 +858,14 @@ def main():
     get_probs(items, args)
     for it in items:
         if not it["category"]:
-            it["category"] = os.path.basename(os.path.dirname(os.path.dirname(it["gt"])))
+            it["category"] = gt_category(it["gt"], args.gt_root)
         evaluate_file(it, args, post)
 
     sel = {"cfg": args.config, "crit": args.criterion}
     k, thr = choose_threshold(items, args.config, args.criterion, args.dcf_weight)
     if k is None:
         k, thr = THRESHOLDS.index(0.4), 0.4
-        print("[!] không có file dev: dùng ngưỡng 0.4 cho CI")
+        print("[!] không có file dev: dùng ngưỡng 0.4 (mặc định FireRed)")
     sel.update(k=k, thr=thr)
     rng = np.random.default_rng(args.seed)
     test = [it for it in items if it["split"] == "test"]
@@ -830,7 +884,8 @@ def main():
 
     tot = pf.sum(0).sum(0) if len(pf) else np.zeros(4)
     m = metr(*tot, args.dcf_weight)
-    print(f"Ngưỡng {args.criterion} trên dev ({args.config}): {thr}")
+    print(f"Ngưỡng {args.criterion} trên dev ({args.config}): {thr}" if any(it["split"] == "dev" for it in items)
+          else f"Không có dev: dùng ngưỡng {thr}")
     print(f"Test strict: MR {m['mr']:.1%}  FAR {m['far']:.1%}  F1 {m['f1']:.3f}  DCF {m['dcf']:.3f}"
           + (f"  (CI F1 {ci['f1'][0]:.3f}–{ci['f1'][1]:.3f})" if ci else ""))
     print(f"-> {args.out}")

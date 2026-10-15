@@ -84,10 +84,19 @@ Sinh file Excel cùng bố cục sheet **KQ du lieu that** (mục A chọn ngư�
 **C. Theo category**) cho FireRedVAD, cộng mục **D** so trực tiếp với số YAMNet trong file của bạn.
 
 ```bash
-python excel_report.py --xlsx "Tong_hop_danh_gia_VAD_test.xlsx" \
-    --audio-root "D:/data/phase_1" --gt-root "D:/data/AAA/Ground_truth" \
-    --onnx models/fireredvad_vad.onnx -o out/firered_report.xlsx
+# Chỉ có audio + ground truth + model: script tự chia dev/test
+python excel_report.py --audio-root "D:/data/phase_1" --gt-root "D:/data/Groundtruth" \
+    --model-dir models -o out/firered_report.xlsx
+
+# Muốn đúng chia dev/test của file YAMNet và có mục D so sánh: thêm --xlsx
+python excel_report.py --xlsx "Tong_hop_danh_gia_VAD_test.xlsx" --audio-root ... --gt-root ... --model-dir models
 ```
+
+* **Chia dev/test khi không có `--xlsx` / `--split-csv`:** lấy mọi file có cả audio và GT, chia theo file,
+  phân tầng theo category, `--dev-ratio 0.3` (30 % dev), `--split-seed 3`. Danh sách được lưu ở
+  `<out>_split.csv` để chạy lại đúng y hệt (`--split-csv`). Category = thư mục đầu tiên dưới `--gt-root`
+  (`Groundtruth/<category>/ground_truth/x.txt`); GT để phẳng thì lấy tiền tố tên file trước `_` (`Asm_xxx` → `Asm`).
+  `--dev-ratio 0`: tất cả là test, dùng ngưỡng cố định ở ô B10 (mặc định 0.4 của FireRed).
 
 * **Cùng quy trình với YAMNet:** cùng file và cùng chia dev / test (đọc sheet `DL theo file`), GT bin
   0.5 s, cờ biên ±1 bin, quét ngưỡng 0.01–0.95, chọn ngưỡng trên dev (DCF-min / F1-max), DCF = 0.75·MR + 0.25·FAR,
