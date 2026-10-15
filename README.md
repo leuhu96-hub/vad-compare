@@ -221,6 +221,11 @@ class MyVAD(VADModel):
 
 rồi thêm `"my_vad": ("vadcmp.models.my_vad", "MyVAD")` vào `REGISTRY` trong `vadcmp/models/__init__.py`.
 
+## Tài liệu
+
+- [`docs/firered_limitations.md`](docs/firered_limitations.md): giới hạn kỹ thuật và ràng buộc khi tích hợp FireRedVAD (non-streaming) vào lib.so Android — đầu vào audio, Fbank/CMVN, runtime, định nghĩa nhãn, hậu xử lý và việc cần kiểm chứng.
+- [`docs/firered_to_yamnet.html`](docs/firered_to_yamnet.html): trang giải thích tương tác.
+
 ## Experiments
 
 - [`experiments/firered_vad/`](experiments/firered_vad/): FireRedVAD chạy trực tiếp bằng ONNX (không dùng package `fireredvad`) cho cả folder dataset `phase_1/<quality>/` + `Groundtruth/<category>/ground_truth/`, xuất segment và metric. `dataset_reader.py` đọc/ghép dataset, dùng lại được cho project khác.
