@@ -8,6 +8,7 @@ bất kỳ**. Code gọi thẳng file `.onnx` qua onnxruntime, không dùng pack
 | `dataset_reader.py` | Đọc và ghép audio ↔ ground truth. **Độc lập**, chỉ dùng thư viện chuẩn → copy sang project khác dùng được |
 | `firered_onnx.py` | Pipeline FireRedVAD từng bước: audio → fbank → CMVN → ONNX → post-processing → segment |
 | `run.py` | Chạy cả dataset (hoặc file lẻ), xuất segment, bin 0.5 s, metric so với GT |
+| `excel_report.py` | Báo cáo Excel (mục A, B, C như file tổng hợp YAMNet) + so với YAMNet |
 
 ## Cài đặt
 
@@ -76,6 +77,32 @@ Miss rate = FN / (TP + FN), FAR = FP / (FP + TN).
 
 Tham số post-processing (đơn vị frame 10 ms): `--threshold 0.4 --smooth 5 --min-speech 20 --min-silence 20
 --max-speech 2000 --merge-silence 0 --extend-speech 0` (mặc định giống upstream).
+
+## Báo cáo Excel giống file tổng hợp YAMNet (`excel_report.py`)
+
+Sinh file Excel cùng bố cục sheet **KQ du lieu that** (mục A chọn ngưỡng, **B. Tầng B trên test**,
+**C. Theo category**) cho FireRedVAD, cộng mục **D** so trực tiếp với số YAMNet trong file của bạn.
+
+```bash
+python excel_report.py --xlsx "Tong_hop_danh_gia_VAD_test.xlsx" \
+    --audio-root "D:/data/phase_1" --gt-root "D:/data/AAA/Ground_truth" \
+    --onnx models/fireredvad_vad.onnx -o out/firered_report.xlsx
+```
+
+* **Cùng quy trình với YAMNet:** cùng file và cùng chia dev / test (đọc sheet `DL theo file`), GT bin
+  0.5 s, cờ biên ±1 bin, quét ngưỡng 0.01–0.95, chọn ngưỡng trên dev (DCF-min / F1-max), DCF = 0.75·MR + 0.25·FAR,
+  CI bootstrap 1000 lần theo file.
+* **Ba cấu hình:** `F0` prob 10 ms thô · `F1` hậu xử lý gốc FireRed (làm mượt 5 frame, máy trạng thái
+  0.2 / 0.2 s, lùi đầu đoạn, cắt đoạn > 20 s) · `F2` prob thô + hậu xử lý A4 của YAMNet (pad 100/120 ms, merge < 500 ms).
+* **Rebin 10 ms → bin 0.5 s:** `--rebin overlap --min-overlap 0.2` (mặc định: bin là speech nếu phủ ≥ 20 %)
+  hoặc `--rebin midpoint`.
+* **Ghép file:** theo tên (không phân biệt hoa thường) giữa cột `File`, audio dưới `--audio-root` và `.txt`
+  dưới `--gt-root` (ưu tiên file nằm trong thư mục `ground_truth`). File không ghép được được liệt kê
+  ở cuối sheet. Một tên có nhiều bản audio: chọn bằng `--quality <chuỗi trong đường dẫn>`.
+* **Trong Excel:** đổi `B7` (F0/F1/F2), `B8` (DCF-min/F1-max), `B6` (trọng số DCF), `B10` (ngưỡng tham khảo)
+  là mục A–D tự tính lại. CI (chữ xanh) chỉ đúng ở cấu hình / ngưỡng Python đã chọn; ô `B13` báo khi lệch.
+* Prob của model được cache ở `out/probs_cache/`: chạy lại với tham số khác chỉ mất vài phút.
+* Không có file xlsx: `--split-csv split.csv` với cột `File, Category, Tập`.
 
 ## Dùng `dataset_reader.py` trong project khác
 
