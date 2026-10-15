@@ -122,6 +122,11 @@ python excel_report.py --xlsx "Tong_hop_danh_gia_VAD_test.xlsx" --audio-root ...
   là mục A–D tự tính lại. CI (chữ xanh) chỉ đúng ở cấu hình / ngưỡng Python đã chọn; ô `B13` báo khi lệch.
 * Prob của model được cache ở `out/probs_cache/`: chạy lại với tham số khác chỉ mất vài phút.
 * Không có file xlsx: `--split-csv split.csv` với cột `File, Category, Tập`.
+* **Khớp với `run.py`:** `run.py` chấm *mọi* file ở ngưỡng 0.4, bin là speech khi phủ ≥ 50 %. `excel_report.py`
+  mặc định chỉ chấm tập test, ngưỡng chọn trên dev, phủ ≥ 20 %, nên số khác nhau là bình thường.
+  Muốn ra đúng số của `run.py` (cấu hình F1): `--dev-ratio 0 --threshold 0.4 --min-overlap 0.5`
+  (cùng `--threshold` nếu `run.py` chạy ngưỡng khác). Nếu một tên file có nhiều bản audio ở các `<quality>`,
+  `run.py` chấm từng bản còn `excel_report.py` chỉ lấy một bản (`--quality`).
 
 ## Dùng `dataset_reader.py` trong project khác
 

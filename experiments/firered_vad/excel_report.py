@@ -314,15 +314,22 @@ def boundary_mask(labels, tol=1):
 
 
 class Binner:
-    """Quyết định 10 ms -> bin GT."""
+    """Quyết định 10 ms -> bin GT.
+    Frame cuối phủ thêm 25 ms (cửa sổ 25 ms), giống decision_to_segment của FireRed: đoạn speech chạm
+    frame cuối kéo tới min(T·10 ms + 25 ms, độ dài file). Nhờ vậy khớp từng bin với run.py."""
 
-    def __init__(self, n, dur, bin_s, rule, min_ov):
-        self.n, self.fpb = n, int(round(bin_s / FRAME))
+    def __init__(self, n, dur, bin_s, rule, min_ov, n_frames):
+        self.n, self.fpb, self.T = n, int(round(bin_s / FRAME)), n_frames
         edges = np.arange(n + 1) * bin_s
         self.width = np.minimum(edges[1:], dur) - edges[:-1]
         self.rule, self.min_ov = rule, min_ov
         mid = (edges[:-1] + np.minimum(edges[1:], dur)) / 2
         self.mid = np.floor(mid / FRAME + 1e-9).astype(int)
+        self.mid_t = mid
+        t0 = round(n_frames * FRAME, 3)                       # giống decisions_to_segments (làm tròn ms)
+        self.tail_end = min(round(t0 + 0.025, 3), dur)
+        self.tail_start = t0
+        self.tail_cov = np.clip(np.minimum(edges[1:], self.tail_end) - np.maximum(edges[:-1], t0), 0, None)
 
     def _pad(self, x, fill=0):
         L = self.n * self.fpb
@@ -331,21 +338,33 @@ class Binner:
         out[:m] = x[:m]
         return out
 
+    def _mid_vals(self, x, fill):
+        """Giá trị tại tâm bin; tâm rơi vào đuôi 25 ms sau frame cuối thì lấy frame cuối."""
+        v = np.full(self.n, fill, dtype=np.float64)
+        inside = self.mid < len(x)
+        v[inside] = x[self.mid[inside]]
+        tail = ~inside & (self.mid_t >= self.tail_start) & (self.mid_t < self.tail_end) & (len(x) > 0)
+        if tail.any():
+            v[tail] = x[-1]
+        return v
+
     def bins(self, dec):
         if self.rule == "midpoint":
-            d = self._pad(dec)
-            return d[np.minimum(self.mid, len(d) - 1)].astype(bool)
-        cnt = self._pad(dec).reshape(self.n, self.fpb).sum(1)
-        return cnt * FRAME >= self.min_ov * self.width - 1e-9
+            return self._mid_vals(dec, 0) > 0
+        cov = self._pad(dec).reshape(self.n, self.fpb).sum(1) * FRAME
+        if len(dec) and dec[-1]:
+            cov = cov + self.tail_cov
+        return cov >= self.min_ov * self.width - 1e-9
 
     def bins_all_thr(self, probs, thr):
         """F0 cho mọi ngưỡng một lần: -> [n_thr, n] bool."""
         if self.rule == "midpoint":
-            p = self._pad(probs, -1.0)[np.minimum(self.mid, self.n * self.fpb - 1)]
-            return p[None, :] >= thr[:, None]
+            return self._mid_vals(probs, -1.0)[None, :] >= thr[:, None]
         P = self._pad(probs, -1.0).reshape(self.n, self.fpb)
-        cnt = (P[None, :, :] >= thr[:, None, None]).sum(2)
-        return cnt * FRAME >= self.min_ov * self.width[None, :] - 1e-9
+        cov = (P[None, :, :] >= thr[:, None, None]).sum(2) * FRAME
+        if len(probs):
+            cov = cov + (probs[-1] >= thr)[:, None] * self.tail_cov[None, :]
+        return cov >= self.min_ov * self.width[None, :] - 1e-9
 
 
 def counts(D, labels, bnd):
@@ -370,7 +389,7 @@ def evaluate_file(it, args, post):
     if n == 0:
         it["counts"] = {c: np.zeros((len(THRESHOLDS), 2, 4), np.int64) for c in CONFIGS}
         return
-    B = Binner(n, it["dur"], args.bin, args.rebin, args.min_overlap)
+    B = Binner(n, it["dur"], args.bin, args.rebin, args.min_overlap, len(it["probs"]))
     thr = np.array(THRESHOLDS)
     p = it["probs"]
     res = {"F0": counts(B.bins_all_thr(p, thr), labels, it["bnd"])}
