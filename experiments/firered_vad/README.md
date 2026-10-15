@@ -96,7 +96,17 @@ python excel_report.py --xlsx "Tong_hop_danh_gia_VAD_test.xlsx" --audio-root ...
   phân tầng theo category, `--dev-ratio 0.3` (30 % dev), `--split-seed 3`. Danh sách được lưu ở
   `<out>_split.csv` để chạy lại đúng y hệt (`--split-csv`). Category = thư mục đầu tiên dưới `--gt-root`
   (`Groundtruth/<category>/ground_truth/x.txt`); GT để phẳng thì lấy tiền tố tên file trước `_` (`Asm_xxx` → `Asm`).
-  `--dev-ratio 0`: tất cả là test, dùng ngưỡng cố định ở ô B10 (mặc định 0.4 của FireRed).
+* **Ngưỡng cố định `--threshold`:** dùng đúng ngưỡng này cho mục B, C và CI thay vì chọn trên dev
+  (ngưỡng lẻ như `0.6026` được thêm vào lưới quét). Kết hợp:
+
+  | Lệnh | Tập | Ngưỡng dùng |
+  |---|---|---|
+  | (mặc định) | 30 % dev / 70 % test | chọn trên dev (DCF-min) |
+  | `--threshold 0.5` | 30 % dev / 70 % test | 0.5; mục A và dòng tham khảo vẫn cho thấy ngưỡng chọn trên dev |
+  | `--dev-ratio 0 --threshold 0.5` | 100 % test | 0.5 |
+  | `--dev-ratio 0` | 100 % test | 0.4 (mặc định FireRed) |
+
+  Trong Excel: ô **B14** (`dev` / `cố định`) chuyển cách lấy ngưỡng, ô **B10** là ngưỡng cố định.
 
 * **Cùng quy trình với YAMNet:** cùng file và cùng chia dev / test (đọc sheet `DL theo file`), GT bin
   0.5 s, cờ biên ±1 bin, quét ngưỡng 0.01–0.95, chọn ngưỡng trên dev (DCF-min / F1-max), DCF = 0.75·MR + 0.25·FAR,

@@ -5,6 +5,9 @@ Tong_hop_danh_gia_VAD_test.xlsx, để so trực tiếp với YAMNet.
     python excel_report.py --audio-root "D:/data/phase_1" --gt-root "D:/data/Groundtruth" \
         --model-dir models -o firered_report.xlsx
 
+    # toàn bộ là test, ngưỡng cố định
+    python excel_report.py --audio-root ... --gt-root ... --model-dir models --dev-ratio 0 --threshold 0.5
+
     # dùng đúng chia dev/test của file YAMNet và thêm mục so sánh D
     python excel_report.py --xlsx Tong_hop_danh_gia_VAD_test.xlsx --audio-root ... --gt-root ... --model-dir models
 
@@ -592,7 +595,7 @@ def write_xlsx(path, items, problems, args, sel, ci, ci_cat, yam):
     put(ws, "A2", f"Nguồn: excel_report.py ({datetime.date.today():%d/%m/%Y}). {len(items)} file "
                   f"(dev {len(dev)} / test {len(test)}); GT: {args.gt_root}; model: {args.onnx or args.model_dir}. "
                   f"Chia dev/test lấy từ {args.split_source}.", note)
-    put(ws, "A3", "Nền vàng = tham số bạn chỉnh (B6:B8, B10) · chữ đen = công thức · chữ xanh = số nhập từ Python "
+    put(ws, "A3", "Nền vàng = tham số bạn chỉnh (B6:B8, B10, B14) · chữ đen = công thức · chữ xanh = số nhập từ Python "
                   "(bootstrap; không tính lại trong Excel). Đổi tham số thì bảng A, B, C, D tự tính lại.", note)
     rule = (f"phủ ≥ {args.min_overlap:.0%} bin" if args.rebin == "overlap" else "tâm bin nằm trong đoạn speech")
     put(ws, "A4", f"Quyết định 10 ms → bin {args.bin:g} s: {rule}. Biên = ±{args.boundary} bin quanh điểm chuyển GT. "
@@ -605,7 +608,7 @@ def write_xlsx(path, items, problems, args, sel, ci, ci_cat, yam):
         (7, "Cấu hình hậu xử lý cho tầng B, category", sel["cfg"], None, True),
         (8, "Tiêu chí chọn ngưỡng trên dev", sel["crit"], None, True),
         (9, "Quy tắc rebin (cố định khi chạy script)", rule, None, False),
-        (10, "Ngưỡng tham khảo (mặc định FireRed)", 0.4, R2, True),
+        (10, "Ngưỡng cố định (--threshold; mặc định 0.4 của FireRed)", args.fixed_thr, "0.00##", True),
     ]
     for r, lab, v, fmt, edit in params:
         put(ws, f"A{r}", lab, wrap=True)
@@ -616,10 +619,16 @@ def write_xlsx(path, items, problems, args, sel, ci, ci_cat, yam):
     ws.add_data_validation(dv2)
     dv1.add("B7")
     dv2.add("B8")
-    put(ws, "A11", "Ngưỡng dùng (tự chọn trên dev theo B7, B8)", wrap=True)
-    put(ws, "B11", "=INDEX($G$17:$G$19,MATCH($B$7,$A$17:$A$19,0))" if dev else "=B10", F(bold=True), R2)
+    put(ws, "A11", "Ngưỡng dùng (B14 = dev: chọn trên dev theo B7, B8; B14 = cố định: B10)", wrap=True)
+    put(ws, "B11", '=IF($B$14="cố định",$B$10,INDEX($G$17:$G$19,MATCH($B$7,$A$17:$A$19,0)))' if dev else "=$B$10",
+        F(bold=True), "0.00##")
+    put(ws, "A14", "Cách lấy ngưỡng (dev | cố định)", wrap=True)
+    put(ws, "B14", sel["mode"], fill=yel)
+    dv3 = DataValidation(type="list", formula1='"dev,cố định"', allow_blank=False)
+    ws.add_data_validation(dv3)
+    dv3.add("B14")
     put(ws, "A12", "Ngưỡng Python đã dùng cho CI và sheet DL theo file", wrap=True)
-    put(ws, "B12", sel["thr"], blue, R2)
+    put(ws, "B12", sel["thr"], blue, "0.00##")
     put(ws, "A13", "Kiểm tra")
     put(ws, "B13", f'=IF(AND(ABS(B11-B12)<0.0000001,B7="{sel["cfg"]}",ABS(B6-{args.dcf_weight})<0.0000001),"Khớp",'
                    f'"KHÁC: CI và DL theo file vẫn ở {sel["cfg"]} / ngưỡng {sel["thr"]} / w {args.dcf_weight}")')
@@ -649,7 +658,8 @@ def write_xlsx(path, items, problems, args, sel, ci, ci_cat, yam):
         put(ws, f"F{r}", f"=MAX({Qq})", fmt=R3)
         put(ws, f"G{r}", f'=IF($B$8="F1-max",E{r},C{r})', fmt=R2)
     if not dev:
-        put(ws, "A20", "Không có file dev: không chọn được ngưỡng, B11 dùng ngưỡng tham khảo B10.", F(color="C00000"))
+        put(ws, "A20", "Không có file dev (--dev-ratio 0): không chọn được ngưỡng, B11 dùng ngưỡng cố định B10.",
+            F(color="C00000"))
 
     # B
     put(ws, "A22", "B. Tầng B trên test (cấu hình B7, ngưỡng B11)", sect)
@@ -657,7 +667,11 @@ def write_xlsx(path, items, problems, args, sel, ci, ci_cat, yam):
                     "Specificity", "DCF", "CI95 F1 (Python)", "CI95 DCF (Python)", "CI95 MR (Python)",
                     "CI95 FAR (Python)"])
     brows = [(24, "Strict (mọi bin)", "all", "$B$11"), (25, "Collar ±1 bin (bỏ bin biên)", "nb", "$B$11"),
-             (26, "Chỉ bin biên", "b", "$B$11"), (27, "Tham khảo: ngưỡng B10, mọi bin", "all", "$B$10")]
+             (26, "Chỉ bin biên", "b", "$B$11")]
+    if dev:
+        brows.append((27, "Tham khảo: ngưỡng chọn trên dev (B7, B8), mọi bin", "all",
+                      "INDEX($G$17:$G$19,MATCH($B$7,$A$17:$A$19,0))"))
+    brows.append((28, "Tham khảo: ngưỡng cố định B10, mọi bin", "all", "$B$10"))
     for r, lab, reg, thr_ref in brows:
         put(ws, f"A{r}", lab, wrap=True)
         put(ws, f"B{r}", reg)
@@ -797,6 +811,9 @@ def main():
     ap.add_argument("--dev-ratio", type=float, default=0.3,
                     help="không có --xlsx / --split-csv: tỉ lệ file mỗi category đưa vào dev (0 = tất cả là test)")
     ap.add_argument("--split-seed", type=int, default=3)
+    ap.add_argument("--threshold", type=float,
+                    help="ngưỡng cố định cho mục B, C và CI (bỏ qua việc chọn trên dev). Không có dev mà không "
+                         "nhập thì dùng 0.4")
     ap.add_argument("--audio-root", required=True)
     ap.add_argument("--gt-root", required=True, help="thư mục GT; ghép theo tên file, ưu tiên file trong ground_truth/")
     ap.add_argument("--quality", help="nếu một tên file có nhiều bản audio: chọn bản có chuỗi này trong đường dẫn")
@@ -830,6 +847,12 @@ def main():
         except Exception:
             pass
     args.f2_order = [s.strip() for s in args.f2_order.split(",") if s.strip()]
+    if args.threshold is not None and not 0 < args.threshold < 1:
+        raise SystemExit("--threshold phải nằm trong (0, 1)")
+    args.fixed_thr = round(args.threshold, 4) if args.threshold is not None else 0.4
+    if args.fixed_thr not in THRESHOLDS:          # ngưỡng lẻ (vd. 0.6026): thêm vào lưới quét
+        THRESHOLDS.append(args.fixed_thr)
+        THRESHOLDS.sort()
 
     if args.split_csv:
         split, args.split_source = read_split_csv(args.split_csv), os.path.basename(args.split_csv)
@@ -863,9 +886,13 @@ def main():
 
     sel = {"cfg": args.config, "crit": args.criterion}
     k, thr = choose_threshold(items, args.config, args.criterion, args.dcf_weight)
-    if k is None:
-        k, thr = THRESHOLDS.index(0.4), 0.4
-        print("[!] không có file dev: dùng ngưỡng 0.4 (mặc định FireRed)")
+    if args.threshold is not None or k is None:
+        if k is None and args.threshold is None:
+            print(f"[!] không có file dev: dùng ngưỡng cố định {args.fixed_thr} (mặc định FireRed)")
+        k, thr = THRESHOLDS.index(args.fixed_thr), args.fixed_thr
+        sel["mode"] = "cố định"
+    else:
+        sel["mode"] = "dev"
     sel.update(k=k, thr=thr)
     rng = np.random.default_rng(args.seed)
     test = [it for it in items if it["split"] == "test"]
@@ -884,8 +911,8 @@ def main():
 
     tot = pf.sum(0).sum(0) if len(pf) else np.zeros(4)
     m = metr(*tot, args.dcf_weight)
-    print(f"Ngưỡng {args.criterion} trên dev ({args.config}): {thr}" if any(it["split"] == "dev" for it in items)
-          else f"Không có dev: dùng ngưỡng {thr}")
+    print(f"Ngưỡng cố định: {thr}" if sel["mode"] == "cố định"
+          else f"Ngưỡng {args.criterion} trên dev ({args.config}): {thr}")
     print(f"Test strict: MR {m['mr']:.1%}  FAR {m['far']:.1%}  F1 {m['f1']:.3f}  DCF {m['dcf']:.3f}"
           + (f"  (CI F1 {ci['f1'][0]:.3f}–{ci['f1'][1]:.3f})" if ci else ""))
     print(f"-> {args.out}")
