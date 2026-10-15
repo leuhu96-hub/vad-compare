@@ -740,6 +740,7 @@ def write_xlsx(path, items, problems, args, sel, ci, ci_cat, yam):
         ws.row_dimensions[rr].height = 42
     for rr in (17, 18, 19):
         ws.row_dimensions[rr].height = 40
+    wb.calculation.fullCalcOnLoad = True           # Excel tính lại công thức khi mở
     wb.save(path)
 
 
