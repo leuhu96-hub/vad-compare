@@ -16,10 +16,29 @@ cùng bố cục sheet **KQ du lieu that** (mục A, B, C, D) như FireRed và Y
 pip install -r requirements.txt
 ```
 
-Model: `--model đường/dẫn/silero_vad.onnx` (v5/v6, input `input`/`state`/`sr`). Mặc định tìm ở
-`./models/silero_vad.onnx` rồi `../../models/silero_vad.onnx`.
+## Dùng model có sẵn
 
-Chạy thử một file: `python silero_onnx.py audio.m4a --threshold 0.5`
+`--model` nhận **file `.onnx` tên tuỳ ý** hoặc **thư mục chứa nó** (trong thư mục: ưu tiên `silero_vad.onnx`,
+rồi file có chữ `silero`, rồi file `.onnx` duy nhất). Không chỉ định thì tìm `./models/silero_vad.onnx`
+rồi `../../models/silero_vad.onnx`. Loại model được **nhận tự động từ chữ ký ONNX**, không cần khai báo:
+
+| Loại | Nhận ra bằng | Cách chạy | Đã thử với |
+|---|---|---|---|
+| `v5` | có input `state` [2,B,128] (`sr` có hoặc không) | 512 mẫu + 64 mẫu ngữ cảnh, mang `state` | `silero_vad.onnx` (v5/v6), `_16k_op15`, `_op18_ifless`, `_openvino_16k`, `_half` |
+| `v4` | input `h`, `c` [2,B,64] + `sr` | 512 mẫu, không ngữ cảnh, mang `h`/`c` | `silero_vad.onnx` bản v4.0 |
+| `sequence` | input `h`, `c` [1,1,128], output `speech_probs` | nhiều khối một lần gọi (nhanh hơn) | `silero_vad_16k_sequence.onnx` |
+
+```bash
+python silero_onnx.py audio.m4a --model "D:/models/my_silero.onnx"     # in loại model + segment
+python excel_report.py --audio-root ... --gt-root ... --model "D:/models"
+```
+
+Kết quả so với `silero_vad.onnx` v6 trên 4 file demo: `_op15`, `_openvino_16k`, `_16k_sequence` trùng tuyệt đối,
+`_op18_ifless` lệch < 1e-6. `_half` khác rõ (cùng quyết định ở ngưỡng 0.5 khoảng 88 % khối), `v4` là model
+khác (khoảng 84 %); hai loại này chạy đúng cách nhưng cho kết quả của chính chúng. Model có chữ ký lạ sẽ báo
+lỗi kèm danh sách input / output để biết vì sao.
+
+Mỗi model có cache prob riêng (khoá theo đường dẫn model), đổi model không dùng nhầm cache cũ.
 
 ## Báo cáo Excel
 

@@ -53,7 +53,8 @@ def get_probs(items, args, log=print):
             from silero_onnx import SileroOnnx
 
             model = SileroOnnx(args.model, threads=args.threads)
-            log(f"[model] {model.model_path}")
+            args.model_desc = f"{model.model_path} [{model.kind}]"
+            log(f"[model] {model.describe()}")
         r = model.run_file(it["audio"])
         it["probs"], it["n_samples"], it["dur"] = r.probs.astype(np.float64), r.n_samples, r.duration
         np.savez_compressed(cp, probs=r.probs, n_samples=r.n_samples)
@@ -77,7 +78,8 @@ class SileroSpec:
 
     @staticmethod
     def add_args(ap):
-        ap.add_argument("--model", default=default_model_path(), help="silero_vad.onnx (v5/v6)")
+        ap.add_argument("--model", default=default_model_path(),
+                        help="file .onnx có sẵn (tên tuỳ ý) hoặc thư mục chứa nó; tự nhận v5/v6, v4, sequence")
         ap.add_argument("--min-speech-ms", type=int, default=250, help="S1: bỏ đoạn ngắn hơn")
         ap.add_argument("--min-silence-ms", type=int, default=100, help="S1: lặng tối thiểu để cắt đoạn")
         ap.add_argument("--speech-pad-ms", type=int, default=30, help="S1: pad mỗi phía")
@@ -96,7 +98,7 @@ class SileroSpec:
 
     @staticmethod
     def model_label(args):
-        return args.model
+        return getattr(args, "model_desc", args.model)
 
     @staticmethod
     def descriptions(args):
