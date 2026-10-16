@@ -14,7 +14,7 @@ và sheet "KQ du lieu that" (mục A, B, C, D), để ba model được chấm t
 Ba cấu hình (sau khi gộp cửa sổ thành score mỗi hop 0.08 s: --rescore triangle + --smooth-hops 5):
   Y0  score hop ≥ ngưỡng, không hậu xử lý
   Y1  hậu xử lý hiện tại của lib: pad 100 / 120 ms → drop 0 → merge < 500 ms   (= A4 trong file tổng hợp)
-  Y2  hậu xử lý kiểu FireRed (vadcmp/decide.py, method fsm): ngưỡng ra = ngưỡng − 0.1, đoạn thô phải dài hơn
+  Y2  hậu xử lý kiểu FireRed (yamnet_post.y2_segments): ngưỡng ra = ngưỡng − 0.1, đoạn thô phải dài hơn
       0.1 s, lặng dài hơn 0.16 s mới cắt, giữ đuôi (hangover), co đuôi 0.08 s
 
 Tham số chung (--rebin, --min-overlap, --dcf-weight, --criterion, --threshold, --dev-ratio …) giống hệt
@@ -29,30 +29,19 @@ import sys
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "common"))
-sys.path.insert(0, ROOT)
 import vad_excel  # noqa: E402
 from dataset_reader import file_key  # noqa: E402
-from yamnet_scores import SR, YamnetModel, find_score_file, index_score_files, read_window_file, rescore  # noqa: E402
+from yamnet_post import (find_score_file, index_score_files, read_window_file, rescore, y0_segments,  # noqa: E402
+                         y1_segments, y2_segments)
+from yamnet_tflite import SR, YamnetTflite, step1_load_audio  # noqa: E402
 
 THRESHOLDS = vad_excel.THRESHOLDS
 
 
-def _audio_16k(path):
-    sys.path.insert(0, os.path.join(HERE, "..", "firered_vad"))
-    from firered_onnx import step1_load_audio, step2_downmix, step3_resample
-
-    x, sr = step1_load_audio(path)
-    return step3_resample(step2_downmix(x), sr, SR)
-
-
 def _duration(path):
     """Độ dài sau khi giải mã (giống chế độ --model), không dùng metadata của container."""
-    sys.path.insert(0, os.path.join(HERE, "..", "firered_vad"))
-    from firered_onnx import step1_load_audio
-
     x, sr = step1_load_audio(path)
     return x.shape[1] / sr
 
@@ -100,21 +89,15 @@ def get_scores(items, args, log=print):
             it["window_s"], it["dur"] = float(z["window_s"]), float(z["duration"])
             continue
         if model is None:
-            model = YamnetModel(args.model, args.hop_s, args.speech_index, args.output, args.output_index,
-                                args.input_samples, args.threads, args.tail)
+            model = YamnetTflite(args.model, args.threads, args.speech_index, args.output, args.output_index,
+                                 args.input_samples, args.hop_s, args.tail)
             args.model_desc = model.describe()
             log(f"[model] {args.model_desc}")
-        x16 = _audio_16k(it["audio"])
-        s, sc = model.window_scores(x16)
-        it["starts"], it["scores"], it["window_s"], it["dur"] = s, sc, model.window_s, len(x16) / SR
-        np.savez_compressed(cp, starts=s, scores=sc, window_s=model.window_s, duration=it["dur"])
-        log(f"[{i}/{len(items)}] {os.path.basename(it['audio'])} ({it['dur']:.1f} s, {len(sc)} cửa sổ)")
-
-
-def hop_segments(on, hop_s, dur):
-    d = np.diff(np.r_[0, on.astype(np.int8), 0])
-    s, e = np.flatnonzero(d == 1), np.flatnonzero(d == -1)
-    return [(a * hop_s, min(b * hop_s, dur)) for a, b in zip(s, e)]
+        r = model.run_file(it["audio"])
+        it["starts"], it["scores"], it["window_s"], it["dur"] = r.starts, r.scores, r.window_s, r.duration
+        np.savez_compressed(cp, starts=r.starts, scores=r.scores, window_s=r.window_s, duration=r.duration)
+        log(f"[{i}/{len(items)}] {os.path.basename(it['audio'])} ({r.duration:.1f} s, {len(r.scores)} cửa sổ, "
+            f"model {r.timings.get('4-5_model', 0):.1f} s)")
 
 
 class YamnetSpec:
@@ -136,7 +119,7 @@ class YamnetSpec:
         m.add_argument("--hop-s", type=float, default=0.08)
         m.add_argument("--speech-index", type=int, default=1, help="vị trí lớp speech trong output 2 lớp")
         m.add_argument("--output", default="auto", choices=["auto", "probs", "logits"])
-        m.add_argument("--output-index", type=int, default=0)
+        m.add_argument("--output-index", type=int, help="chọn tensor output (mặc định: tensor có 2 lớp)")
         m.add_argument("--input-samples", type=int, help="ghi đè số mẫu mỗi cửa sổ (mặc định đọc từ model)")
         m.add_argument("--tail", choices=["drop", "pad"], default="drop",
                        help="đoạn cuối không đủ một cửa sổ: drop = bỏ (giống lib), pad = thêm cửa sổ đệm 0")
@@ -192,27 +175,20 @@ class YamnetSpec:
 
     @staticmethod
     def decide(it, args, thr, n):
-        from vadcmp.decide import decide_fsm
-        from vadcmp.timeline import FrameScores
-
         dur, hop = it["dur"], args.hop_s
         if "hops" not in it:
             it["hops"] = rescore(it["starts"], it["window_s"], it["scores"], hop, dur, args.rescore, args.smooth_hops)
         hops = it["hops"]
-        fs = FrameScores.from_hops(hops, hop, duration=dur)
         bins = lambda segs: vad_excel.seg_bins(segs, n, dur, args.bin, args.rebin, args.min_overlap)  # noqa: E731
         D0, D1, D2 = [], [], []
         for t in thr:
-            raw = hop_segments(hops >= t, hop, dur)
-            D0.append(bins(raw))
-            D1.append(bins(vad_excel.rules_segs(raw, dur, args.y1_pad_before, args.y1_pad_after, args.y1_drop,
-                                                args.y1_merge, args.y1_order)))
-            pp = {"method": "fsm", "thr_off": (float(t) - args.y2_thr_off) if args.y2_thr_off > 0 else None,
-                  "min_speech": args.y2_min_speech, "min_silence": args.y2_min_silence,
-                  "hangover": bool(args.y2_hangover), "pad_before": args.y2_pad_before,
-                  "pad_after": args.y2_pad_after}
-            seg = decide_fsm(fs, dur, float(t), pp)
-            D2.append(bins(vad_excel.merge_segs([tuple(x) for x in np.asarray(seg).reshape(-1, 2)])))
+            t = float(t)
+            D0.append(bins(y0_segments(hops, t, hop, dur)))
+            D1.append(bins(y1_segments(hops, t, hop, dur, args.y1_pad_before, args.y1_pad_after, args.y1_drop,
+                                       args.y1_merge, args.y1_order)))
+            D2.append(bins(y2_segments(hops, t, hop, dur, (t - args.y2_thr_off) if args.y2_thr_off > 0 else None,
+                                       args.y2_min_speech, args.y2_min_silence, bool(args.y2_hangover),
+                                       args.y2_pad_before, args.y2_pad_after)))
         return {"Y0": np.stack(D0), "Y1": np.stack(D1), "Y2": np.stack(D2)}
 
 
