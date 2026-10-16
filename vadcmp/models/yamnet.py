@@ -27,14 +27,31 @@ def _softmax(z):
 
 def _tflite_interpreter(path: str, num_threads: int):
     errors = []
-    for mod, attr in (("ai_edge_litert.interpreter", "Interpreter"),
-                      ("tflite_runtime.interpreter", "Interpreter"),
-                      ("tensorflow.lite", "Interpreter")):
+
+    def litert():
+        from ai_edge_litert.interpreter import Interpreter
+        return Interpreter
+
+    def tflite_runtime():
+        from tflite_runtime.interpreter import Interpreter
+        return Interpreter
+
+    def tf_lite():
+        import tensorflow as tf
+        return tf.lite.Interpreter
+
+    def tf_internal():
+        from tensorflow.lite.python.interpreter import Interpreter
+        return Interpreter
+
+    for name, get in (("ai-edge-litert", litert), ("tflite-runtime", tflite_runtime),
+                      ("tensorflow tf.lite", tf_lite), ("tensorflow lite.python", tf_internal)):
         try:
-            m = __import__(mod, fromlist=[attr])
-            return getattr(m, attr)(model_path=path, num_threads=num_threads)
-        except ImportError as e:
-            errors.append(f"{mod}: {e}")
+            cls = get()
+        except Exception as e:  # noqa: BLE001  (vd. AttributeError với tensorflow mới)
+            errors.append(f"{name}: {type(e).__name__}: {e}")
+            continue
+        return cls(model_path=path, num_threads=num_threads)
     raise ImportError("No TFLite runtime found. pip install ai-edge-litert\n" + "\n".join(errors))
 
 

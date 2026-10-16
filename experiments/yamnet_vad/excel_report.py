@@ -90,7 +90,7 @@ def get_scores(items, args, log=print):
             continue
         if model is None:
             model = YamnetTflite(args.model, args.threads, args.speech_index, args.output, args.output_index,
-                                 args.input_samples, args.hop_s, args.tail)
+                                 args.input_samples, args.hop_s, args.tail, runtime=args.runtime)
             args.model_desc = model.describe()
             log(f"[model] {args.model_desc}")
         r = model.run_file(it["audio"])
@@ -117,6 +117,7 @@ class YamnetSpec:
                                                 "(mặc định: cùng tên file audio, tìm khắp --scores-dir)")
         m = ap.add_argument_group("model")
         m.add_argument("--hop-s", type=float, default=0.08)
+        m.add_argument("--runtime", help="ép dùng TFLite runtime: litert | tflite-runtime | tensorflow")
         m.add_argument("--speech-index", type=int, default=1, help="vị trí lớp speech trong output 2 lớp")
         m.add_argument("--output", default="auto", choices=["auto", "probs", "logits"])
         m.add_argument("--output-index", type=int, help="chọn tensor output (mặc định: tensor có 2 lớp)")

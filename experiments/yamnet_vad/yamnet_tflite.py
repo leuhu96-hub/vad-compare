@@ -13,7 +13,8 @@ cùng cách làm với firered_vad/firered_onnx.py và silero_vad/silero_onnx.py
   6. gộp cửa sổ -> score mỗi hop             -> yamnet_post.rescore
   7. hậu xử lý -> đoạn speech               -> yamnet_post.y0/y1/y2_segments
 
-TFLite runtime: ai-edge-litert (khuyên dùng), tflite-runtime, hoặc tensorflow. File .onnx cùng kiểu input
+TFLite runtime: ai-edge-litert (khuyên dùng), tflite-runtime, hoặc tensorflow (tf.lite.Interpreter); thử lần lượt,
+cách nào lỗi (kể cả AttributeError của tensorflow mới) thì chuyển sang cách sau. File .onnx cùng kiểu input
 cũng chạy được (onnxruntime).
 
     python yamnet_tflite.py audio.m4a --model yamnet_vad.tflite --threshold 0.6026
@@ -37,26 +38,54 @@ YAMNET_SAMPLES = 15600
 
 
 # =========================================================================== backend
-def load_tflite(path, threads=1):
+def _interpreter_classes():
+    """Các cách lấy lớp Interpreter, theo thứ tự ưu tiên. Mỗi cách là (tên, hàm trả về lớp)."""
+    def litert():
+        from ai_edge_litert.interpreter import Interpreter
+        return Interpreter
+
+    def tflite_runtime():
+        from tflite_runtime.interpreter import Interpreter
+        return Interpreter
+
+    def tf_lite():                       # cách chuẩn với tensorflow: tf.lite.Interpreter
+        import tensorflow as tf
+        return tf.lite.Interpreter
+
+    def tf_internal():                   # một số bản TF không cho import tensorflow.lite trực tiếp
+        from tensorflow.lite.python.interpreter import Interpreter
+        return Interpreter
+
+    return [("ai-edge-litert", litert), ("tflite-runtime", tflite_runtime),
+            ("tensorflow (tf.lite.Interpreter)", tf_lite), ("tensorflow (lite.python.interpreter)", tf_internal)]
+
+
+def load_tflite(path, threads=1, prefer=None):
+    """-> (interpreter, tên runtime). Thử lần lượt; lỗi nào (ImportError, AttributeError …) cũng chuyển sang
+    cách tiếp theo và được ghi lại để báo nếu tất cả đều hỏng. prefer: chỉ thử runtime có tên chứa chuỗi này."""
     errors = []
-    for mod, attr in (("ai_edge_litert.interpreter", "Interpreter"),
-                      ("tflite_runtime.interpreter", "Interpreter"),
-                      ("tensorflow.lite", "Interpreter")):
-        try:
-            m = __import__(mod, fromlist=[attr])
-        except ImportError as e:
-            errors.append(f"{mod}: {e}")
+    for name, get in _interpreter_classes():
+        if prefer and prefer.lower() not in name.lower():
             continue
-        return getattr(m, attr)(model_path=path, num_threads=threads)
-    raise ImportError("Không có TFLite runtime. Cài một trong: pip install ai-edge-litert | tflite-runtime | "
-                      "tensorflow\n" + "\n".join(errors))
+        try:
+            cls = get()
+        except Exception as e:                                   # noqa: BLE001
+            errors.append(f"  {name}: {type(e).__name__}: {e}")
+            continue
+        try:
+            return cls(model_path=path, num_threads=threads), name
+        except TypeError:                                        # bản cũ không có num_threads
+            return cls(model_path=path), name
+    raise ImportError("Không mở được TFLite runtime nào. Cách dễ nhất: pip install ai-edge-litert\n"
+                      "(Các bản tensorflow mới đã đánh dấu bỏ tf.lite.Interpreter, chuyển sang ai-edge-litert.) Chi tiết từng cách đã thử:\n"
+                      + "\n".join(errors))
 
 
 class _Tflite:
     """Bọc Interpreter: một input waveform, đọc mọi output."""
 
-    def __init__(self, path, threads):
-        self.it = load_tflite(path, threads)
+    def __init__(self, path, threads, prefer=None):
+        self.it, self.runtime = load_tflite(path, threads, prefer)
         self.it.allocate_tensors()
         self.inp = self.it.get_input_details()[0]
         self.outs = self.it.get_output_details()
@@ -92,6 +121,8 @@ class _Tflite:
 
 
 class _Onnx:
+    runtime = "onnxruntime"
+
     def __init__(self, path, threads):
         import onnxruntime as ort
 
@@ -141,12 +172,12 @@ def _softmax(z):
 
 class YamnetTflite:
     def __init__(self, model_path, threads=1, speech_index=1, output="auto", output_index=None,
-                 input_samples=None, hop_s=0.08, tail="drop", downmix="mean", res_type="soxr_hq"):
+                 input_samples=None, hop_s=0.08, tail="drop", downmix="mean", res_type="soxr_hq", runtime=None):
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Không thấy model: {model_path}")
         self.model_path = model_path
         self.backend = "onnx" if model_path.lower().endswith(".onnx") else "tflite"
-        self.m = _Onnx(model_path, threads) if self.backend == "onnx" else _Tflite(model_path, threads)
+        self.m = _Onnx(model_path, threads) if self.backend == "onnx" else _Tflite(model_path, threads, runtime)
         shape = self.m.input_shape
         fixed = [d for d in shape if d > 1]
         self.n_in = int(input_samples or (fixed[-1] if fixed else YAMNET_SAMPLES))
@@ -174,7 +205,7 @@ class YamnetTflite:
 
     def describe(self):
         outs = self.m.output_shapes()
-        return (f"{self.model_path} [{self.backend}] input {self.m.input_shape} -> chạy {self.run_shape}, "
+        return (f"{self.model_path} [{self.m.runtime}] input {self.m.input_shape} -> chạy {self.run_shape}, "
                 f"cửa sổ {self.n_in} mẫu = {self.window_s:.3f} s, hop {self.hop} mẫu; output {outs}, "
                 f"dùng output #{self.out_index}, lớp speech = {self.speech_index}")
 
@@ -244,8 +275,10 @@ if __name__ == "__main__":
     ap.add_argument("--tail", default="drop", choices=["drop", "pad"])
     ap.add_argument("--rescore", default="triangle", choices=["triangle", "mean", "max"])
     ap.add_argument("--smooth-hops", type=int, default=5)
+    ap.add_argument("--runtime", help="ép dùng runtime: litert | tflite-runtime | tensorflow")
     a = ap.parse_args()
-    m = YamnetTflite(a.model, speech_index=a.speech_index, output=a.output, output_index=a.output_index, tail=a.tail)
+    m = YamnetTflite(a.model, speech_index=a.speech_index, output=a.output, output_index=a.output_index, tail=a.tail,
+                     runtime=a.runtime)
     print("Model:", m.describe())
     r = m.run_file(a.audio)
     print(f"{a.audio}: {r.orig_sr} Hz, {r.channels} kênh, {r.duration:.2f} s, {len(r.scores)} cửa sổ; "

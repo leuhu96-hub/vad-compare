@@ -23,7 +23,10 @@ Cùng quy trình và cùng bố cục Excel với [`../firered_vad`](../firered_
      (`--output auto | probs | logits`); lớp speech `--speech-index 1`
 6. gộp cửa sổ → score hop (`yamnet_post.rescore`) → 7. hậu xử lý (`yamnet_post.y0/y1/y2_segments`)
 
-TFLite runtime: `pip install ai-edge-litert` (hoặc `tflite-runtime`, hoặc `tensorflow`). File `.onnx` cùng
+TFLite runtime: `pip install ai-edge-litert` (khuyên dùng), hoặc `tflite-runtime`, hoặc `tensorflow`. Code thử lần
+lượt ai-edge-litert → tflite-runtime → `tf.lite.Interpreter` → `tensorflow.lite.python.interpreter`; cách nào lỗi
+(vd. `AttributeError: module 'tensorflow.lite' has no attribute 'interpreter'` ở tensorflow mới) thì chuyển sang
+cách sau, và dòng `Model: […]` cho biết runtime đang dùng. Ép một runtime: `--runtime litert|tflite-runtime|tensorflow`. File `.onnx` cùng
 kiểu input cũng chạy được bằng onnxruntime.
 
 ## Hai nguồn score cho báo cáo (chọn một)
