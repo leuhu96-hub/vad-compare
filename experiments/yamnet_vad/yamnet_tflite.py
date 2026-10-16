@@ -60,9 +60,46 @@ def _interpreter_classes():
             ("tensorflow (tf.lite.Interpreter)", tf_lite), ("tensorflow (lite.python.interpreter)", tf_internal)]
 
 
+def resolve_model(path):
+    """File model (tên tuỳ ý) hoặc thư mục chứa đúng một file .tflite / .onnx."""
+    path = os.path.abspath(os.path.expanduser(str(path).strip().strip('"').strip("'")))
+    if os.path.isdir(path):
+        cands = sorted(f for f in os.listdir(path) if f.lower().endswith((".tflite", ".onnx")))
+        if len(cands) != 1:
+            raise FileNotFoundError(f"{path}: cần đúng một file .tflite/.onnx trong thư mục, đang có {cands or 'không có'}"
+                                    " – hãy chỉ thẳng tới file bằng --model")
+        path = os.path.join(path, cands[0])
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Không thấy model: {path}\n(đường dẫn tương đối được tính từ thư mục đang đứng: "
+                                f"{os.getcwd()})")
+    return path
+
+
+def read_tflite_bytes(path):
+    """Đọc model vào bộ nhớ và kiểm tra đúng là file TFLite (flatbuffer có mã 'TFL3' ở byte 4–8).
+    Truyền bytes (model_content) thay vì đường dẫn: tránh lỗi 'Could not open …' của TFLite trên Windows
+    khi đường dẫn có dấu tiếng Việt / ký tự Unicode (vd. 'OneDrive/Máy tính/…')."""
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except OSError as e:
+        raise OSError(f"Không đọc được {path}: {e}\n(file OneDrive 'chỉ có trên mạng' cần tải về máy trước: "
+                      "chuột phải > Always keep on this device)") from e
+    if len(data) < 8:
+        raise ValueError(f"{path}: file rỗng hoặc quá nhỏ ({len(data)} byte)")
+    if data[4:8] != b"TFL3":
+        head = data[:64].lstrip()[:15].lower()
+        hint = (" Có vẻ là trang HTML: link tải trả về trang web chứ không phải file model, hãy tải lại file thật."
+                if head.startswith((b"<!doctype", b"<html")) else
+                " Có vẻ là file nén / file khác: giải nén hoặc kiểm tra lại." if data[:2] in (b"PK", b"\x1f\x8b") else "")
+        raise ValueError(f"{path}: không phải file TFLite (thiếu mã 'TFL3', {len(data)} byte).{hint}")
+    return data
+
+
 def load_tflite(path, threads=1, prefer=None):
     """-> (interpreter, tên runtime). Thử lần lượt; lỗi nào (ImportError, AttributeError …) cũng chuyển sang
     cách tiếp theo và được ghi lại để báo nếu tất cả đều hỏng. prefer: chỉ thử runtime có tên chứa chuỗi này."""
+    data = read_tflite_bytes(path)
     errors = []
     for name, get in _interpreter_classes():
         if prefer and prefer.lower() not in name.lower():
@@ -73,12 +110,12 @@ def load_tflite(path, threads=1, prefer=None):
             errors.append(f"  {name}: {type(e).__name__}: {e}")
             continue
         try:
-            return cls(model_path=path, num_threads=threads), name
+            return cls(model_content=data, num_threads=threads), name
         except TypeError:                                        # bản cũ không có num_threads
-            return cls(model_path=path), name
+            return cls(model_content=data), name
     raise ImportError("Không mở được TFLite runtime nào. Cách dễ nhất: pip install ai-edge-litert\n"
-                      "(Các bản tensorflow mới đã đánh dấu bỏ tf.lite.Interpreter, chuyển sang ai-edge-litert.) Chi tiết từng cách đã thử:\n"
-                      + "\n".join(errors))
+                      "(Các bản tensorflow mới đã đánh dấu bỏ tf.lite.Interpreter, chuyển sang ai-edge-litert.) "
+                      "Chi tiết từng cách đã thử:\n" + "\n".join(errors))
 
 
 class _Tflite:
@@ -128,7 +165,8 @@ class _Onnx:
 
         so = ort.SessionOptions()
         so.intra_op_num_threads = so.inter_op_num_threads = threads
-        self.sess = ort.InferenceSession(path, so, providers=["CPUExecutionProvider"])
+        with open(path, "rb") as f:                       # bytes: tránh lỗi đường dẫn Unicode trên Windows
+            self.sess = ort.InferenceSession(f.read(), so, providers=["CPUExecutionProvider"])
         self.inp = self.sess.get_inputs()[0]
         self.outs = self.sess.get_outputs()
         self.shape = None
@@ -173,8 +211,7 @@ def _softmax(z):
 class YamnetTflite:
     def __init__(self, model_path, threads=1, speech_index=1, output="auto", output_index=None,
                  input_samples=None, hop_s=0.08, tail="drop", downmix="mean", res_type="soxr_hq", runtime=None):
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"Không thấy model: {model_path}")
+        model_path = resolve_model(model_path)
         self.model_path = model_path
         self.backend = "onnx" if model_path.lower().endswith(".onnx") else "tflite"
         self.m = _Onnx(model_path, threads) if self.backend == "onnx" else _Tflite(model_path, threads, runtime)

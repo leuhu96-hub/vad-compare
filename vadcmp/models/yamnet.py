@@ -51,7 +51,11 @@ def _tflite_interpreter(path: str, num_threads: int):
         except Exception as e:  # noqa: BLE001  (vd. AttributeError với tensorflow mới)
             errors.append(f"{name}: {type(e).__name__}: {e}")
             continue
-        return cls(model_path=path, num_threads=num_threads)
+        with open(path, "rb") as f:          # bytes: tránh lỗi "Could not open" với đường dẫn Unicode trên Windows
+            data = f.read()
+        if data[4:8] != b"TFL3":
+            raise ValueError(f"{path}: không phải file TFLite (thiếu mã 'TFL3') – file tải về có thể là trang HTML")
+        return cls(model_content=data, num_threads=num_threads)
     raise ImportError("No TFLite runtime found. pip install ai-edge-litert\n" + "\n".join(errors))
 
 
