@@ -224,6 +224,8 @@ rồi thêm `"my_vad": ("vadcmp.models.my_vad", "MyVAD")` vào `REGISTRY` trong 
 ## Experiments
 
 - [`experiments/firered_vad/`](experiments/firered_vad/): FireRedVAD chạy trực tiếp bằng ONNX (không dùng package `fireredvad`) cho cả folder dataset `phase_1/<quality>/` + `Groundtruth/<category>/ground_truth/`, xuất segment và metric. `dataset_reader.py` đọc/ghép dataset, dùng lại được cho project khác.
+- [`experiments/silero_vad/`](experiments/silero_vad/): Silero VAD chạy trực tiếp bằng ONNX + báo cáo Excel cùng bố cục với FireRed / YAMNet.
+- [`experiments/common/vad_excel.py`](experiments/common/vad_excel.py): phần chung của các báo cáo Excel (chia dev/test, quét ngưỡng, mục A–D, CI). Thêm model mới = viết một `spec`.
 
 ## Test
 

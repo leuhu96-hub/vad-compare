@@ -8,7 +8,7 @@ bất kỳ**. Code gọi thẳng file `.onnx` qua onnxruntime, không dùng pack
 | `dataset_reader.py` | Đọc và ghép audio ↔ ground truth. **Độc lập**, chỉ dùng thư viện chuẩn → copy sang project khác dùng được |
 | `firered_onnx.py` | Pipeline FireRedVAD từng bước: audio → fbank → CMVN → ONNX → post-processing → segment |
 | `run.py` | Chạy cả dataset (hoặc file lẻ), xuất segment, bin 0.5 s, metric so với GT |
-| `excel_report.py` | Báo cáo Excel (mục A, B, C như file tổng hợp YAMNet) + so với YAMNet |
+| `excel_report.py` | Báo cáo Excel (mục A, B, C như file tổng hợp YAMNet) + so với YAMNet; phần chung ở `../common/vad_excel.py` (dùng chung với `../silero_vad`) |
 
 ## Cài đặt
 
